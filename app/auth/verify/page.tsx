@@ -1,42 +1,19 @@
-import { redirect } from 'next/navigation';
-import { verifyMagicToken } from '@/lib/auth/token';
-import { issueSession } from '@/lib/auth/session';
-import { prisma } from '@/lib/prisma';
 import Link from 'next/link';
 
 interface Props {
-  searchParams: Promise<{ token?: string }>;
+  searchParams: Promise<{ error?: string }>;
 }
 
-export default async function VerifyPage({ searchParams }: Props) {
-  const { token } = await searchParams;
+export default async function VerifyErrorPage({ searchParams }: Props) {
+  const { error } = await searchParams;
 
-  if (!token) {
-    return <ErrorUI message="Missing token. Please request a new magic link." />;
-  }
-
-  const result = await verifyMagicToken(token);
-
-  if (!result.ok) {
-    const message =
-      result.reason === 'used'
-        ? 'This link has already been used. Please request a new one.'
+  const message =
+    error === 'used'
+      ? 'This link has already been used. Please request a new one.'
+      : error === 'missing'
+        ? 'Missing token. Please request a new magic link.'
         : 'This link is invalid or has expired. Please request a new one.';
-    return <ErrorUI message={message} />;
-  }
 
-  const user = await prisma.user.upsert({
-    where: { email: result.email },
-    update: { updatedAt: new Date() },
-    create: { email: result.email },
-  });
-
-  await issueSession({ sub: user.id, email: user.email });
-
-  redirect('/dashboard');
-}
-
-function ErrorUI({ message }: { message: string }) {
   return (
     <main className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm text-center">

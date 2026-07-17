@@ -13,8 +13,6 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  magicLinkTokens MagicLinkToken[]
-
   @@map("users")
 }
 
@@ -25,8 +23,6 @@ model MagicLinkToken {
   expiresAt DateTime  @map("expires_at")
   usedAt    DateTime? @map("used_at")
   createdAt DateTime  @default(now()) @map("created_at")
-
-  user   User?   @relation(fields: [email], references: [email])
 
   @@index([email])
   @@map("magic_link_tokens")

@@ -15,7 +15,7 @@ function getResend(): Resend {
 
 function buildMagicLinkUrl(token: string): string {
   const base = process.env.APP_URL ?? "http://localhost:3000";
-  return `${base}/auth/verify?token=${encodeURIComponent(token)}`;
+  return `${base}/api/auth/verify?token=${encodeURIComponent(token)}`;
 }
 
 function loadTemplate(link: string): { html: string; text: string } {
