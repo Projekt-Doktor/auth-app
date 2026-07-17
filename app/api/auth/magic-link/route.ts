@@ -31,6 +31,10 @@ export async function POST(req: NextRequest) {
   // Fire-and-forget — always return 200 to prevent email enumeration
   try {
     const token = await createMagicToken(parsed.data.email);
+    if (process.env.NODE_ENV === 'development') {
+      const base = process.env.APP_URL ?? 'http://localhost:3000';
+      console.log(`[magic-link] DEV verify URL: ${base}/api/auth/verify?token=${encodeURIComponent(token)}`);
+    }
     await sendMagicLink(parsed.data.email, token);
   } catch (err) {
     console.error('[magic-link] Failed to send:', err);
