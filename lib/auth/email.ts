@@ -19,7 +19,7 @@ function buildMagicLinkUrl(token: string): string {
 }
 
 function loadTemplate(link: string): { html: string; text: string } {
-  const templatePath = path.join(__dirname, "../../templates/magic-link.html");
+  const templatePath = path.join(process.cwd(), "lib", "templates", "magic-link.html");
   let html = fs.readFileSync(templatePath, "utf8");
   html = html.replace(/\{\{MAGIC_LINK\}\}/g, link);
 

@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { prisma } from "../prisma";
+import { prisma } from "@/lib/prisma";
 
 const TOKEN_EXPIRY_MINUTES = 15;
 const TOKEN_BYTES = 32;
@@ -47,8 +47,6 @@ type TokenRow = { id: string; email: string; token_hash: string; expires_at: Dat
 export async function verifyMagicToken(raw: string): Promise<VerifyResult> {
   const tokenHash = hashToken(raw);
 
-  // First check if the token exists at all (to distinguish not_found vs used/expired).
-  // The actual consumption is done atomically below.
   const record = await prisma.magicLinkToken.findUnique({
     where: { tokenHash },
   });
@@ -57,11 +55,7 @@ export async function verifyMagicToken(raw: string): Promise<VerifyResult> {
   if (record.usedAt !== null) return { ok: false, reason: "used" };
   if (record.expiresAt < new Date()) return { ok: false, reason: "expired" };
 
-  // Atomically consume the token in a single statement:
-  // UPDATE ... WHERE used_at IS NULL AND expires_at > NOW() RETURNING email
-  // This eliminates the TOCTOU window between the check above and the write.
-  // A second concurrent request that passes the checks above will find 0 rows
-  // here and be rejected.
+  // Atomically consume the token
   const rows = await prisma.$queryRaw<TokenRow[]>`
     UPDATE magic_link_tokens
     SET    used_at = NOW()
@@ -72,11 +66,9 @@ export async function verifyMagicToken(raw: string): Promise<VerifyResult> {
   `;
 
   if (rows.length === 0) {
-    // Lost the race — another request consumed the token between our check and update.
     return { ok: false, reason: "used" };
   }
 
-  // Constant-time comparison as a final safeguard against hash-collision attacks.
   if (!safeEqual(rows[0].token_hash, tokenHash)) {
     return { ok: false, reason: "not_found" };
   }

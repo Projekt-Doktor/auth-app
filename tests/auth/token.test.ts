@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { generateRawToken, hashToken } from "../../src/lib/auth/token";
+import { generateRawToken, hashToken } from "@/lib/auth/token";
 
 // We unit-test only the pure functions here.
 // DB-dependent functions (createMagicToken, verifyMagicToken) belong in

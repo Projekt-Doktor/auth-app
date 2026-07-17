@@ -1,25 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Request, Response, NextFunction } from "express";
 
 // ---------------------------------------------------------------------------
 // Mock Prisma so these tests run without a real DB connection
 // ---------------------------------------------------------------------------
-vi.mock("../../src/lib/prisma", () => ({
+vi.mock("@/lib/prisma", () => ({
   prisma: {
     $queryRaw: vi.fn(),
     magicLinkToken: {
       findUnique: vi.fn(),
-      update: vi.fn(),
       updateMany: vi.fn(),
       create: vi.fn(),
     },
   },
 }));
 
-import { prisma } from "../../src/lib/prisma";
-import { verifyMagicToken, hashToken } from "../../src/lib/auth/token";
-import { parseSession, issueSession, clearSession } from "../../src/lib/auth/session";
-import { requireAuth } from "../../src/middleware/requireAuth";
+// ---------------------------------------------------------------------------
+// Mock next/headers so session functions work outside the Next.js runtime
+// ---------------------------------------------------------------------------
+vi.mock("next/headers", () => ({
+  cookies: vi.fn(),
+}));
+
+import { prisma } from "@/lib/prisma";
+import { cookies } from "next/headers";
+import { verifyMagicToken, hashToken } from "@/lib/auth/token";
+import { issueSession, getSession, clearSession } from "@/lib/auth/session";
 
 // ---------------------------------------------------------------------------
 // verifyMagicToken
@@ -51,7 +56,7 @@ describe("verifyMagicToken", () => {
       id: "1",
       email: "test@example.com",
       tokenHash: hashToken("expired-token"),
-      expiresAt: new Date(Date.now() - 60_000), // in the past
+      expiresAt: new Date(Date.now() - 60_000),
       usedAt: null,
       createdAt: new Date(),
     });
@@ -71,7 +76,6 @@ describe("verifyMagicToken", () => {
       usedAt: null,
       createdAt: new Date(),
     });
-    // Simulate the atomic UPDATE … RETURNING row
     vi.mocked(prisma.$queryRaw).mockResolvedValue([
       { id: "1", email: "success@example.com", token_hash: hash, expires_at: new Date(), used_at: new Date() },
     ]);
@@ -92,7 +96,6 @@ describe("verifyMagicToken", () => {
       usedAt: null,
       createdAt: new Date(),
     });
-    // Another request won the race — UPDATE returns 0 rows
     vi.mocked(prisma.$queryRaw).mockResolvedValue([]);
 
     const result = await verifyMagicToken(rawToken);
@@ -101,7 +104,7 @@ describe("verifyMagicToken", () => {
 });
 
 // ---------------------------------------------------------------------------
-// session helpers
+// session helpers (Next.js — mocked next/headers)
 // ---------------------------------------------------------------------------
 describe("session helpers", () => {
   const payload = { sub: "user-123", email: "user@example.com" };
@@ -109,97 +112,55 @@ describe("session helpers", () => {
   beforeEach(() => {
     process.env.JWT_SECRET = "test-secret-long-enough-for-hs256-algorithm";
     process.env.JWT_EXPIRES_IN = "7d";
+    vi.clearAllMocks();
   });
 
-  it("issueSession sets an httpOnly cookie", () => {
-    const cookies: Record<string, unknown> = {};
-    const res = {
-      cookie: (name: string, val: string, opts: object) => {
-        cookies[name] = { val, opts };
-      },
-    } as unknown as Response;
+  it("issueSession sets an httpOnly cookie", async () => {
+    const mockSet = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(cookies).mockResolvedValue({ set: mockSet } as any);
 
-    issueSession(res, payload);
-    expect(cookies["auth_token"]).toBeDefined();
-    expect((cookies["auth_token"] as { opts: { httpOnly: boolean } }).opts.httpOnly).toBe(true);
+    await issueSession(payload);
+
+    expect(mockSet).toHaveBeenCalledOnce();
+    const [name, , opts] = mockSet.mock.calls[0] as [string, string, Record<string, unknown>];
+    expect(name).toBe("auth_token");
+    expect(opts.httpOnly).toBe(true);
   });
 
-  it("parseSession returns null when no cookie is present", () => {
-    const req = { cookies: {} } as Request;
-    expect(parseSession(req)).toBeNull();
+  it("getSession returns null when no cookie is present", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(cookies).mockResolvedValue({ get: () => undefined } as any);
+    expect(await getSession()).toBeNull();
   });
 
-  it("round-trips: issueSession → parseSession", () => {
-    let cookieValue = "";
-    const res = {
-      cookie: (_name: string, val: string) => {
-        cookieValue = val;
-      },
-    } as unknown as Response;
+  it("round-trips: issueSession → getSession preserves payload", async () => {
+    let storedToken = "";
+    const mockSet = vi.fn((_name: string, val: string) => {
+      storedToken = val;
+    });
 
-    issueSession(res, payload);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(cookies).mockResolvedValue({ set: mockSet } as any);
+    await issueSession(payload);
 
-    const req = { cookies: { auth_token: cookieValue } } as unknown as Request;
-    const parsed = parseSession(req);
+    vi.mocked(cookies).mockResolvedValue({
+      get: (_name: string) => ({ value: storedToken }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    const parsed = await getSession();
+
     expect(parsed?.sub).toBe(payload.sub);
     expect(parsed?.email).toBe(payload.email);
   });
-});
 
-// ---------------------------------------------------------------------------
-// requireAuth middleware
-// ---------------------------------------------------------------------------
-describe("requireAuth middleware", () => {
-  beforeEach(() => {
-    process.env.JWT_SECRET = "test-secret-long-enough-for-hs256-algorithm";
-  });
+  it("clearSession deletes the auth_token cookie", async () => {
+    const mockDelete = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(cookies).mockResolvedValue({ delete: mockDelete } as any);
 
-  function makeRes() {
-    const locals: Record<string, unknown> = {};
-    const body: { status?: number; json?: unknown } = {};
-    return {
-      locals,
-      status(code: number) {
-        body.status = code;
-        return this;
-      },
-      json(data: unknown) {
-        body.json = data;
-        return this;
-      },
-      _body: body,
-    };
-  }
+    await clearSession();
 
-  it("rejects requests without a cookie with 401", () => {
-    const req = { cookies: {} } as Request;
-    const res = makeRes() as unknown as Response;
-    const next = vi.fn();
-
-    requireAuth(req, res, next as NextFunction);
-
-    expect((res as unknown as ReturnType<typeof makeRes>)._body.status).toBe(401);
-    expect(next).not.toHaveBeenCalled();
-  });
-
-  it("calls next() and attaches session for a valid cookie", () => {
-    // Build a valid token
-    let cookieValue = "";
-    const fakeRes = {
-      cookie: (_: string, val: string) => { cookieValue = val; },
-    } as unknown as Response;
-    issueSession(fakeRes, { sub: "u1", email: "ok@example.com" });
-
-    const req = { cookies: { auth_token: cookieValue } } as unknown as Request;
-    const res = makeRes() as unknown as Response;
-    const next = vi.fn();
-
-    requireAuth(req, res, next as NextFunction);
-
-    expect(next).toHaveBeenCalledOnce();
-    expect((res as unknown as ReturnType<typeof makeRes>).locals.session).toMatchObject({
-      sub: "u1",
-      email: "ok@example.com",
-    });
+    expect(mockDelete).toHaveBeenCalledWith("auth_token");
   });
 });
