@@ -1,0 +1,36 @@
+{
+  "name": "auth-app",
+  "version": "1.0.0",
+  "description": "Email + magic link authentication",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.15.0",
+    "cookie-parser": "^1.4.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.2",
+    "resend": "^3.4.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.7",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^20.14.11",
+    "prisma": "^5.15.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.5.3",
+    "vitest": "^4.1.10"
+  }
+}
